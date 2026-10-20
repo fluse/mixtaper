@@ -215,6 +215,7 @@ export function Timeline({
   const tracksRef = useRef(null);
   const [viewW, setViewW] = useState(1200);
   const [dropTrack, setDropTrack] = useState(null);
+  const [reorder, setReorder] = useState(null); // { trackId, insert }
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -340,6 +341,51 @@ export function Timeline({
   const onGainReset = useCallback(
     (clip) => set((d) => ({ ...d, clips: d.clips.map((c) => (c.id === clip.id ? { ...c, gain: 1 } : c)) })),
     [set],
+  );
+
+  /* ---------- Spuren umsortieren ---------- */
+  const onReorderStart = useCallback(
+    (e, trackId) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const from = docRef.current.tracks.findIndex((t) => t.id === trackId);
+      const n = docRef.current.tracks.length;
+      const insertAt = (clientY) => {
+        const r = tracksRef.current.getBoundingClientRect();
+        return clamp(Math.round((clientY - r.top) / TRACK_H), 0, n);
+      };
+      let insert = from;
+      setReorder({ trackId, insert: from });
+      document.body.style.cursor = 'grabbing';
+
+      const move = (ev) => {
+        insert = insertAt(ev.clientY);
+        setReorder({ trackId, insert });
+        // am Rand automatisch scrollen
+        const el = scrollRef.current;
+        const r = el.getBoundingClientRect();
+        if (ev.clientY < r.top + 70) el.scrollTop -= 12;
+        else if (ev.clientY > r.bottom - 30) el.scrollTop += 12;
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        document.body.style.cursor = '';
+        setReorder(null);
+        // Einfügen vor Position `insert`; eigene Position oder direkt dahinter = keine Änderung
+        if (insert === from || insert === from + 1) return;
+        set((d) => {
+          const tracks = [...d.tracks];
+          const [moved] = tracks.splice(from, 1);
+          tracks.splice(insert > from ? insert - 1 : insert, 0, moved);
+          return { ...d, tracks };
+        });
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    },
+    [docRef, set, scrollRef],
   );
 
   /* ---------- Marker ziehen ---------- */
@@ -509,9 +555,15 @@ export function Timeline({
         </div>
 
         {/* Spuren */}
-        <div ref={tracksRef}>
+        <div ref={tracksRef} className="relative">
+          {reorder && (
+            <div
+              className="absolute left-0 right-0 h-0.5 bg-tape-400 z-[45] pointer-events-none shadow-[0_0_8px_rgba(255,93,143,0.9)]"
+              style={{ top: reorder.insert * TRACK_H - 1 }}
+            />
+          )}
           {doc.tracks.map((t) => (
-            <div key={t.id} className="flex">
+            <div key={t.id} className={`flex ${reorder?.trackId === t.id ? 'opacity-50' : ''}`}>
               <TrackHeader
                 track={t}
                 selected={t.id === selectedTrackId}
@@ -524,6 +576,7 @@ export function Timeline({
                 onCloseGaps={onCloseGaps}
                 onBeginEdit={onBeginEdit}
                 onEndEdit={onEndEdit}
+                onReorderStart={onReorderStart}
               />
               <Lane
                 track={t}

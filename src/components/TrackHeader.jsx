@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Megaphone, Magnet, Trash2, Volume2, VolumeX, Headphones, Circle } from 'lucide-react';
+import { Megaphone, Magnet, Trash2, Volume2, VolumeX, Headphones, Circle, GripVertical } from 'lucide-react';
 
 function Toggle({ active, onClick, title, children, activeCls }) {
   return (
@@ -27,6 +27,7 @@ export const TrackHeader = memo(function TrackHeader({
   onDelete,
   onCloseGaps,
   onBeginEdit,
+  onReorderStart,
   onEndEdit,
 }) {
   return (
@@ -38,6 +39,14 @@ export const TrackHeader = memo(function TrackHeader({
       <div className="w-1.5 shrink-0" style={{ background: track.color }} />
       <div className="flex-1 min-w-0 flex flex-col gap-1.5 px-2.5 py-2">
         <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            title="Spur verschieben (ziehen)"
+            onPointerDown={(e) => onReorderStart(e, track.id)}
+            className="-ml-1.5 -mr-1 text-ink-500 hover:text-white cursor-grab active:cursor-grabbing touch-none"
+          >
+            <GripVertical size={15} />
+          </button>
           {recording && <Circle size={10} className="text-red-500 fill-red-500 rec-pulse shrink-0" />}
           <input
             value={track.name}
