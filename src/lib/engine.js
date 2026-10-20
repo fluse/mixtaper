@@ -94,11 +94,69 @@ export function echoTail(echo) {
   return Math.min(15, echo.time * (1 + Math.log(0.001) / Math.log(fb)));
 }
 
-/** Gesamtlänge inkl. nachklingender Echos (für den Export). */
+/* ------------------------------------------------------------------ */
+/* Hall (Reverb)                                                       */
+/* ------------------------------------------------------------------ */
+
+export const REVERB_PRESETS = {
+  raum: { label: 'Raum', decay: 0.7, predelay: 0.005, damp: 0.6, mix: 0.25 },
+  studio: { label: 'Studio', decay: 1.3, predelay: 0.015, damp: 0.35, mix: 0.3 },
+  halle: { label: 'Halle', decay: 2.6, predelay: 0.03, damp: 0.45, mix: 0.35 },
+  kathedrale: { label: 'Kathedrale', decay: 5, predelay: 0.05, damp: 0.55, mix: 0.4 },
+};
+
+export function reverbTail(rv) {
+  if (!rv || !(rv.mix > 0)) return 0;
+  return Math.min(10, rv.decay + (rv.predelay || 0));
+}
+
+/** Wie lange ein Clip nach seinem Ende noch nachklingt (Echo, dann Hall darauf). */
+export function fxTail(clip) {
+  return echoTail(clip.echo) + reverbTail(clip.reverb);
+}
+
+/** Gesamtlänge inkl. nachklingender Effekte (für den Export). */
 export function mixDuration(doc) {
   let end = 0;
-  for (const c of doc.clips) end = Math.max(end, clipEnd(c) + echoTail(c.echo));
+  for (const c of doc.clips) end = Math.max(end, clipEnd(c) + fxTail(c));
   return end;
+}
+
+const irCache = new Map();
+
+/**
+ * Künstliche Raumantwort: Stereo-Rauschen, das in `decay` Sekunden um 60 dB abklingt
+ * und mit der Zeit dumpfer wird (Luft/Wände schlucken Höhen).
+ */
+function impulseResponse(sampleRate, rv) {
+  const decay = Math.round(Math.min(10, Math.max(0.1, rv.decay)) * 20) / 20;
+  const pre = Math.round(Math.min(0.2, Math.max(0, rv.predelay || 0)) * 1000) / 1000;
+  const damp = Math.round(Math.min(1, Math.max(0, rv.damp ?? 0.4)) * 20) / 20;
+  const key = `${sampleRate}|${decay}|${pre}|${damp}`;
+  if (irCache.has(key)) return irCache.get(key);
+
+  const preLen = Math.floor(pre * sampleRate);
+  const len = preLen + Math.floor(decay * sampleRate);
+  const ir = new AudioBuffer({ numberOfChannels: 2, length: len, sampleRate });
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    let y = 0;
+    let energy = 0;
+    for (let i = preLen; i < len; i++) {
+      const t = (i - preLen) / sampleRate;
+      const env = Math.exp((-6.9 * t) / decay); // −60 dB nach `decay`
+      // Tiefpass, der mit der Zeit enger wird
+      const a = Math.max(0.02, 1 - damp * Math.min(1, t / decay) * 0.97);
+      y += a * (Math.random() * 2 - 1 - y);
+      d[i] = y * env;
+      energy += d[i] * d[i];
+    }
+    const norm = 1 / Math.sqrt(energy || 1);
+    for (let i = preLen; i < len; i++) d[i] *= norm * 0.5;
+  }
+  irCache.set(key, ir);
+  if (irCache.size > 24) irCache.delete(irCache.keys().next().value);
+  return ir;
 }
 
 /* ------------------------------------------------------------------ */
@@ -126,6 +184,23 @@ export function buildGraph(actx, dest, doc, sources, from, { when = actx.current
     nodes.push(duck, vol);
   }
 
+  // Hall-Prozessoren werden pro Spur und Einstellung geteilt (Faltung ist rechenintensiv)
+  const reverbBus = new Map();
+  const reverbInput = (trackId, track, rv) => {
+    const key = `${trackId}|${rv.decay}|${rv.predelay}|${rv.damp}`;
+    let bus = reverbBus.get(key);
+    if (!bus) {
+      const conv = actx.createConvolver();
+      conv.normalize = false;
+      conv.buffer = impulseResponse(actx.sampleRate, rv);
+      conv.connect(track.duck);
+      bus = conv;
+      reverbBus.set(key, bus);
+      nodes.push(conv);
+    }
+    return bus;
+  };
+
   const players = [];
   for (const clip of doc.clips) {
     const buffer = sources.get(clip.sourceId)?.buffer;
@@ -143,6 +218,7 @@ export function buildGraph(actx, dest, doc, sources, from, { when = actx.current
 
     // Echo: Verzögerung mit Rückkopplung und Dämpfung (Tiefpass) im Rückkopplungszweig
     const e = clip.echo;
+    let echoOut = null;
     if (e && e.mix > 0) {
       const delay = actx.createDelay(2);
       delay.delayTime.value = Math.min(2, Math.max(0.01, e.time));
@@ -160,6 +236,18 @@ export function buildGraph(actx, dest, doc, sources, from, { when = actx.current
       tone.connect(wet);
       wet.connect(track.duck);
       nodes.push(delay, tone, fb, wet);
+      echoOut = wet;
+    }
+
+    // Hall: trockenes Signal und Echos gemeinsam in den Hall-Prozessor
+    const rv = clip.reverb;
+    if (rv && rv.mix > 0) {
+      const send = actx.createGain();
+      send.gain.value = rv.mix;
+      g.connect(send);
+      if (echoOut) echoOut.connect(send);
+      send.connect(reverbInput(clip.trackId, track, rv));
+      nodes.push(send);
     }
 
     const delay = Math.max(0, clip.start - from);

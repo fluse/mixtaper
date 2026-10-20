@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  Scissors, Trash2, Copy, WandSparkles, Blend, FolderSearch, Keyboard, Mic, Megaphone, AudioLines, StickyNote, Settings2, RefreshCw, BookmarkPlus, Sparkles, Repeat2,
+  Scissors, Trash2, Copy, WandSparkles, Blend, FolderSearch, Keyboard, Mic, Megaphone, AudioLines, StickyNote, Settings2, RefreshCw, BookmarkPlus, Sparkles, SlidersHorizontal,
 } from 'lucide-react';
 import { Button, Field, Slider, Checkbox, inputCls } from './ui';
 import { fmtTime, gainToDb, dbToGain } from '../lib/utils';
@@ -99,8 +99,12 @@ function ClipInspector({ clip, source, track, selCount = 1, onChange, onBeginEdi
         <div className="flex-1 flex flex-wrap content-start gap-2">
           <Button icon={Scissors} onClick={actions.split}>Teilen</Button>
           <Button icon={Sparkles} onClick={actions.optimize}>Stimme optimieren</Button>
-          <Button icon={Repeat2} onClick={actions.echo} className={clip.echo ? 'ring-1 ring-tape-500/50 text-tape-400' : ''}>
-            {clip.echo ? 'Echo bearbeiten' : 'Echo'}
+          <Button
+            icon={SlidersHorizontal}
+            onClick={actions.fx}
+            className={clip.echo || clip.reverb ? 'ring-1 ring-tape-500/50 text-tape-400' : ''}
+          >
+            {clip.echo && clip.reverb ? 'Effekte: Echo + Hall' : clip.echo ? 'Effekte: Echo' : clip.reverb ? 'Effekte: Hall' : 'Effekte'}
           </Button>
           <Button icon={WandSparkles} onClick={actions.trimSilence}>Stille entfernen</Button>
           <Button icon={Blend} onClick={actions.crossfade}>Crossfade mit Vorgänger</Button>

@@ -1,4 +1,4 @@
-import { buildGraph, echoTail, mixDuration } from './engine';
+import { buildGraph, fxTail, mixDuration } from './engine';
 import { buildChapters } from './chapters';
 import { buildId3 } from './id3';
 
@@ -91,7 +91,7 @@ function createMp3Worker() {
 export async function exportMix(doc, sources, opts) {
   const { path, format = 'mp3', kbps = 192, normalize = true, chapters = true, onProgress = () => {}, signal } = opts;
   const duration = mixDuration(doc);
-  const preroll = Math.max(0, ...doc.clips.map((c) => echoTail(c.echo)));
+  const preroll = Math.max(0, ...doc.clips.map(fxTail));
   if (duration <= 0) throw new Error('Das Mixtape ist noch leer.');
   const totalFrames = Math.ceil(duration * SAMPLE_RATE);
   const chunks = Math.ceil(totalFrames / (CHUNK_SEC * SAMPLE_RATE));
