@@ -1,24 +1,27 @@
-import { buildGraph } from './engine';
+import { buildGraph, echoTail, mixDuration } from './engine';
 import { buildChapters } from './chapters';
 import { buildId3 } from './id3';
-import { projectDuration } from './utils';
 
 const SAMPLE_RATE = 44100;
 const CHUNK_SEC = 30;
 const TARGET_PEAK = 0.891; // -1 dBFS
 
 /** Rendert einen Abschnitt des Mixes offline (stückweise, damit lange Mixtapes nicht den Speicher sprengen). */
-async function renderChunk(doc, sources, index, totalFrames) {
+async function renderChunk(doc, sources, index, totalFrames, preroll) {
   const chunkFrames = CHUNK_SEC * SAMPLE_RATE;
   const startFrame = index * chunkFrames;
   const frames = Math.min(chunkFrames, totalFrames - startFrame);
   const from = startFrame / SAMPLE_RATE;
-  const oc = new OfflineAudioContext(2, frames, SAMPLE_RATE);
+  // Vorlauf: Echos aus dem vorherigen Abschnitt klingen so korrekt weiter
+  const pre = index === 0 ? 0 : Math.round(preroll * SAMPLE_RATE);
+  const oc = new OfflineAudioContext(2, frames + pre, SAMPLE_RATE);
   const master = oc.createGain();
   master.gain.value = doc.masterVolume ?? 1;
   master.connect(oc.destination);
-  buildGraph(oc, master, doc, sources, from, { when: 0, to: from + frames / SAMPLE_RATE });
-  return oc.startRendering();
+  buildGraph(oc, master, doc, sources, from - pre / SAMPLE_RATE, { when: 0, to: from + frames / SAMPLE_RATE });
+  const buf = await oc.startRendering();
+  if (!pre) return buf;
+  return { numberOfChannels: buf.numberOfChannels, getChannelData: (c) => buf.getChannelData(c).subarray(pre) };
 }
 
 function peakOf(buf) {
@@ -87,7 +90,8 @@ function createMp3Worker() {
  */
 export async function exportMix(doc, sources, opts) {
   const { path, format = 'mp3', kbps = 192, normalize = true, chapters = true, onProgress = () => {}, signal } = opts;
-  const duration = projectDuration(doc);
+  const duration = mixDuration(doc);
+  const preroll = Math.max(0, ...doc.clips.map((c) => echoTail(c.echo)));
   if (duration <= 0) throw new Error('Das Mixtape ist noch leer.');
   const totalFrames = Math.ceil(duration * SAMPLE_RATE);
   const chunks = Math.ceil(totalFrames / (CHUNK_SEC * SAMPLE_RATE));
@@ -102,7 +106,7 @@ export async function exportMix(doc, sources, opts) {
     let peak = 0;
     for (let i = 0; i < chunks; i++) {
       check();
-      const buf = await renderChunk(doc, sources, i, totalFrames);
+      const buf = await renderChunk(doc, sources, i, totalFrames, preroll);
       peak = Math.max(peak, peakOf(buf));
       onProgress((i + 1) / (chunks * passes), 'Analysiere Lautstärke …');
     }
@@ -122,7 +126,7 @@ export async function exportMix(doc, sources, opts) {
 
     for (let i = 0; i < chunks; i++) {
       check();
-      const buf = await renderChunk(doc, sources, i, totalFrames);
+      const buf = await renderChunk(doc, sources, i, totalFrames, preroll);
       const L = buf.getChannelData(0).slice();
       const R = buf.getChannelData(1).slice();
       if (scale !== 1) {

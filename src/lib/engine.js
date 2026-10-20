@@ -77,6 +77,31 @@ function duckEnvelope(intervals, depth) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Echo                                                                */
+/* ------------------------------------------------------------------ */
+
+export const ECHO_PRESETS = {
+  slapback: { label: 'Slapback', time: 0.12, feedback: 0.15, mix: 0.35, damp: 0.3 },
+  echo: { label: 'Echo', time: 0.35, feedback: 0.4, mix: 0.4, damp: 0.4 },
+  canyon: { label: 'Canyon', time: 0.6, feedback: 0.55, mix: 0.45, damp: 0.6 },
+  dub: { label: 'Dub', time: 0.45, feedback: 0.7, mix: 0.5, damp: 0.75 },
+};
+
+/** Wie lange ein Echo nach Clip-Ende nachklingt (bis ca. −60 dB), max. 15 s. */
+export function echoTail(echo) {
+  if (!echo || !(echo.mix > 0)) return 0;
+  const fb = Math.min(0.9, Math.max(0.01, echo.feedback));
+  return Math.min(15, echo.time * (1 + Math.log(0.001) / Math.log(fb)));
+}
+
+/** Gesamtlänge inkl. nachklingender Echos (für den Export). */
+export function mixDuration(doc) {
+  let end = 0;
+  for (const c of doc.clips) end = Math.max(end, clipEnd(c) + echoTail(c.echo));
+  return end;
+}
+
+/* ------------------------------------------------------------------ */
 /* Audio-Graph                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -115,6 +140,27 @@ export function buildGraph(actx, dest, doc, sources, from, { when = actx.current
     applyEnvelope(g.gain, clipEnvelope(clip), from, when);
     src.connect(g);
     g.connect(track.duck);
+
+    // Echo: Verzögerung mit Rückkopplung und Dämpfung (Tiefpass) im Rückkopplungszweig
+    const e = clip.echo;
+    if (e && e.mix > 0) {
+      const delay = actx.createDelay(2);
+      delay.delayTime.value = Math.min(2, Math.max(0.01, e.time));
+      const tone = actx.createBiquadFilter();
+      tone.type = 'lowpass';
+      tone.frequency.value = 1200 + (1 - (e.damp ?? 0.4)) * 12000;
+      const fb = actx.createGain();
+      fb.gain.value = Math.min(0.9, Math.max(0, e.feedback));
+      const wet = actx.createGain();
+      wet.gain.value = e.mix;
+      g.connect(delay);
+      delay.connect(tone);
+      tone.connect(fb);
+      fb.connect(delay);
+      tone.connect(wet);
+      wet.connect(track.duck);
+      nodes.push(delay, tone, fb, wet);
+    }
 
     const delay = Math.max(0, clip.start - from);
     const into = Math.max(0, from - clip.start);

@@ -24,6 +24,7 @@ npm run dist     # Windows-Installer bauen (Ordner release/)
 | **Bearbeiten** | Verschieben (auch zwischen Spuren), Ränder trimmen, Fade-In/-Out per Griff oder Regler, Clip-Lautstärke, Teilen (S), Duplizieren (Strg+D), Löschen (Entf), Crossfade mit Vorgänger, „Stille entfernen“, Undo/Redo |
 | **Stimme optimieren** | Pro Clip: Rumpelfilter, Klarheits-EQ, Hall-/Raumgeräusch-Reduktion (Expander mit Vorausschau), Kompressor, Lautstärke angleichen – mit Vorher/Nachher-Vergleich; speichert eine neue Datei, Original bleibt erhalten |
 | **Mehrfachauswahl** | Strg/Umschalt+Klick, Auswahlrahmen (im Leeren ziehen) oder Strg+A; gemeinsam ziehen (auch auf andere Spuren), mit ←/→ verschieben, löschen, duplizieren |
+| **Echo** | Pro Clip (nicht-destruktiv, live): Verzögerung, Wiederholungen, Echo-Lautstärke, Dämpfung; Voreinstellungen Slapback/Echo/Canyon/Dub, Vorhören; Ausklang wird beim Export mitgerendert |
 | **Magnet-Modus** | Clips rasten an Clip-Kanten, Markern und Abspielposition ein; „Lücken schließen“ pro Spur |
 | **Ducking** | Spuren mit „Sprache“ senken alle anderen Spuren automatisch ab (Stärke im Projekt-Panel) |
 | **Notizen & Kapitel** | Doppelklick in die Marker-Leiste oder „M“: Notiz mit Text, Regieanweisung und Farbe; optional als Kapitelmarke |

@@ -6,6 +6,7 @@ import { Inspector } from './components/Inspector';
 import { YouTubeDialog, ExportDialog, JCardDialog } from './components/Dialogs';
 import { SoundLibrary } from './components/SoundLibrary';
 import { VoiceFxDialog } from './components/VoiceFxDialog';
+import { EchoDialog } from './components/EchoDialog';
 import { encodeWav } from './lib/voicefx';
 import { ResizeHandle } from './components/ui';
 import { useHistory } from './lib/history';
@@ -1011,8 +1012,9 @@ export default function App() {
       remove: deleteSelection,
       toLibrary: clipToLibrary,
       optimize: openVoiceFx,
+      echo: () => selection?.type === 'clip' && setDialog('echo'),
     }),
-    [splitAt, trimSilence, crossfade, duplicateClip, deleteSelection, clipToLibrary, openVoiceFx],
+    [splitAt, trimSilence, crossfade, duplicateClip, deleteSelection, clipToLibrary, openVoiceFx, selection],
   );
 
   const ytDefaultTrack =
@@ -1142,6 +1144,18 @@ export default function App() {
       )}
       {dialog === 'export' && <ExportDialog doc={doc} sources={sourcesRef.current} onClose={() => setDialog(null)} />}
       {dialog === 'jcard' && <JCardDialog doc={doc} onClose={() => setDialog(null)} />}
+      {dialog === 'echo' && selectedClip && (
+        <EchoDialog
+          clip={selectedClip}
+          sources={sourcesRef.current}
+          onApply={(echo) => {
+            // auf alle ausgewählten Clips anwenden
+            const ids = new Set(selectedClipIds(selection));
+            set((d) => ({ ...d, clips: d.clips.map((c) => (ids.has(c.id) ? { ...c, echo } : c)) }));
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
       {dialog === 'voicefx' && selectedClip && sourcesRef.current.get(selectedClip.sourceId)?.buffer && (
         <VoiceFxDialog
           clip={selectedClip}

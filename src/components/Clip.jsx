@@ -47,6 +47,11 @@ export const Clip = memo(function Clip({ clip, source, zoom, height, selected, c
       >
         {missing && <TriangleAlert size={11} className="shrink-0" />}
         <span className="truncate">{clip.name}</span>
+        {clip.echo && width > 90 && (
+          <span className="shrink-0 rounded bg-black/30 px-1 text-[9px] font-semibold uppercase tracking-wide" title="Echo aktiv">
+            Echo
+          </span>
+        )}
         {width > 140 && (
           <span className="ml-auto pl-2 shrink-0 text-white/70 tabular-nums">
             {Math.abs(db) > 0.05 && `${db > 0 ? '+' : ''}${db.toFixed(1)} dB · `}
