@@ -336,6 +336,26 @@ export function Timeline({
             return;
           }
           patch = { start, trackId: tracks[idx].id };
+        } else if (mode === 'trim-l' && orig.reversed) {
+          // Rückwärts: linke Kante = Ende des Original-Ausschnitts → offset bleibt, Dauer ändert sich
+          const room = Math.min(maxLen - orig.offset - orig.duration, orig.start);
+          let ns = orig.start + clamp(dt, -room, orig.duration - 0.1);
+          const s = snap(ns);
+          if (s != null) ns = s;
+          const d = clamp(ns - orig.start, -room, orig.duration - 0.1);
+          const dur = orig.duration - d;
+          patch = { start: orig.start + d, duration: dur, fadeIn: Math.min(orig.fadeIn, dur - orig.fadeOut) };
+        } else if (mode === 'trim-r' && orig.reversed) {
+          // Rückwärts: rechte Kante = Anfang des Original-Ausschnitts → offset wandert mit
+          let end = orig.start + clamp(orig.duration + dt, 0.1, orig.offset + orig.duration);
+          const s = snap(end);
+          if (s != null) end = s;
+          const dur = clamp(end - orig.start, 0.1, orig.offset + orig.duration);
+          patch = {
+            duration: dur,
+            offset: orig.offset + orig.duration - dur,
+            fadeOut: Math.min(orig.fadeOut, Math.max(0, dur - orig.fadeIn)),
+          };
         } else if (mode === 'trim-l') {
           let ns = orig.start + clamp(dt, -Math.min(orig.offset, orig.start), orig.duration - 0.1);
           const s = snap(ns);

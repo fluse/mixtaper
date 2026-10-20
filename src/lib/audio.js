@@ -34,6 +34,41 @@ export function computePeaks(buffer) {
   return peaks;
 }
 
+const reversedCache = new WeakMap();
+
+/** Rückwärts-Version eines Puffers (einmal berechnet, danach aus dem Cache). */
+export function reversedBuffer(buffer) {
+  let rev = reversedCache.get(buffer);
+  if (!rev) {
+    rev = new AudioBuffer({ numberOfChannels: buffer.numberOfChannels, length: buffer.length, sampleRate: buffer.sampleRate });
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      const src = buffer.getChannelData(ch);
+      const dst = rev.getChannelData(ch);
+      for (let i = 0, n = src.length; i < n; i++) dst[i] = src[n - 1 - i];
+    }
+    reversedCache.set(buffer, rev);
+  }
+  return rev;
+}
+
+const reversedPeaksCache = new WeakMap();
+export function reversedPeaks(peaks) {
+  let rev = reversedPeaksCache.get(peaks);
+  if (!rev) {
+    rev = peaks.slice().reverse();
+    reversedPeaksCache.set(peaks, rev);
+  }
+  return rev;
+}
+
+/**
+ * Bei rückwärts laufenden Clips beschreibt `offset` weiterhin den Ausschnitt im Original.
+ * Im umgedrehten Puffer liegt derselbe Ausschnitt bei `Länge − offset − duration`.
+ */
+export function playOffset(clip, bufferDuration) {
+  return clip.reversed ? Math.max(0, bufferDuration - clip.offset - clip.duration) : clip.offset;
+}
+
 /** Grobe Wellenform (Werte 0–100) für Vorschauen, z. B. in der Sound-Liste. */
 export function computeMiniWave(buffer, offset = 0, duration = buffer.duration - offset, n = 140) {
   const sr = buffer.sampleRate;

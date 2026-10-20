@@ -206,6 +206,7 @@ export default function App() {
           name: s.clipName ?? stripExt(s.name),
           start: t,
           offset: s.clipOffset ?? 0,
+          ...(s.clipReversed ? { reversed: true } : {}),
           duration: s.clipDuration ?? s.buffer.duration,
           gain: 1,
           fadeIn: 0,
@@ -311,6 +312,7 @@ export default function App() {
           (i) =>
             i.path === en.path &&
             Math.abs((i.offset ?? 0) - offset) < 0.01 &&
+            !!i.reversed === !!en.reversed &&
             (en.duration == null || Math.abs(i.duration - en.duration) < 0.01),
         );
         if (dupe) continue;
@@ -324,6 +326,7 @@ export default function App() {
             offset,
             duration: en.duration ?? src.buffer.duration - offset,
             wave: computeMiniWave(src.buffer, offset, en.duration ?? src.buffer.duration - offset),
+            ...(en.reversed ? { reversed: true } : {}),
             addedAt: Date.now(),
           });
         } catch {
@@ -387,7 +390,7 @@ export default function App() {
         const src = await sourceForPath(item.path, item.name);
         const offset = Math.min(item.offset ?? 0, src.buffer.duration);
         insertSources(
-          [{ ...src, clipName: item.name, clipOffset: offset, clipDuration: Math.min(item.duration, src.buffer.duration - offset) }],
+          [{ ...src, clipName: item.name, clipOffset: offset, clipDuration: Math.min(item.duration, src.buffer.duration - offset), clipReversed: item.reversed }],
           trackId,
           at,
         );
@@ -642,9 +645,18 @@ export default function App() {
       let rightSel = null;
       for (const c of targets) {
         const cut = t - c.start;
-        const right = { ...c, id: uid('clip'), start: t, offset: c.offset + cut, duration: c.duration - cut, fadeIn: 0 };
+        // Rückwärts: der linke Teil spielt das Ende des Original-Ausschnitts
+        const left = { ...c, duration: cut, fadeOut: 0, offset: c.reversed ? c.offset + c.duration - cut : c.offset };
+        const right = {
+          ...c,
+          id: uid('clip'),
+          start: t,
+          offset: c.reversed ? c.offset : c.offset + cut,
+          duration: c.duration - cut,
+          fadeIn: 0,
+        };
         rightSel = right.id;
-        replace.set(c.id, [{ ...c, duration: cut, fadeOut: 0 }, right]);
+        replace.set(c.id, [left, right]);
       }
       set((x) => ({ ...x, clips: x.clips.flatMap((c) => replace.get(c.id) ?? [c]) }));
       if (rightSel) setSelection({ type: 'clip', id: rightSel });
@@ -762,7 +774,8 @@ export default function App() {
       notify('Im Clip ist nur Stille.', 'info');
       return;
     }
-    const cutStart = s.start - c.offset;
+    // Rückwärts: am Clip-Anfang liegt das Ende des Original-Ausschnitts
+    const cutStart = c.reversed ? c.offset + c.duration - s.end : s.start - c.offset;
     updateClip(c.id, { start: c.start + cutStart, offset: s.start, duration: s.end - s.start });
     notify(`Stille entfernt (${(c.duration - (s.end - s.start)).toFixed(1)} s)`, 'success');
   }, [selection, updateClip, notify]);
@@ -992,7 +1005,7 @@ export default function App() {
       notify('Dieser Clip hat keine Datei auf der Festplatte.', 'error');
       return;
     }
-    addToLibrary([{ path: src.path, name: c.name, offset: c.offset, duration: c.duration }]);
+    addToLibrary([{ path: src.path, name: c.name, offset: c.offset, duration: c.duration, reversed: !!c.reversed }]);
   }, [selection, addToLibrary, notify]);
 
   const selectedClip = selection?.type === 'clip' ? doc.clips.find((c) => c.id === selection.id) : null;
@@ -1035,6 +1048,14 @@ export default function App() {
       remove: deleteSelection,
       toLibrary: clipToLibrary,
       optimize: openVoiceFx,
+      reverse: () => {
+        // alle ausgewählten Clips umschalten (Richtung des angeklickten Clips gibt den neuen Wert vor)
+        const ids = new Set(selectedClipIds(selection));
+        const primary = docRef.current.clips.find((c) => c.id === selection?.id);
+        if (!primary) return;
+        const reversed = !primary.reversed;
+        set((d) => ({ ...d, clips: d.clips.map((c) => (ids.has(c.id) ? { ...c, reversed } : c)) }));
+      },
       fx: () => selection?.type === 'clip' && setDialog('fx'),
     }),
     [splitAt, trimSilence, crossfade, duplicateClip, deleteSelection, clipToLibrary, openVoiceFx, selection],

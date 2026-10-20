@@ -1,4 +1,4 @@
-import { getAudioContext } from './audio';
+import { getAudioContext, playOffset, reversedBuffer } from './audio';
 import { clipEnd, effectiveTrackGain } from './utils';
 
 /* ------------------------------------------------------------------ */
@@ -210,7 +210,7 @@ export function buildGraph(actx, dest, doc, sources, from, { when = actx.current
     if (end <= from || clip.start >= to) continue;
 
     const src = actx.createBufferSource();
-    src.buffer = buffer;
+    src.buffer = clip.reversed ? reversedBuffer(buffer) : buffer;
     const g = actx.createGain();
     applyEnvelope(g.gain, clipEnvelope(clip), from, when);
     src.connect(g);
@@ -254,7 +254,7 @@ export function buildGraph(actx, dest, doc, sources, from, { when = actx.current
     const into = Math.max(0, from - clip.start);
     const dur = clip.duration - into;
     if (dur <= 0) continue;
-    src.start(when + delay, clip.offset + into, dur);
+    src.start(when + delay, playOffset(clip, buffer.duration) + into, dur);
     players.push(src);
     nodes.push(g);
   }

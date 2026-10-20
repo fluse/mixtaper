@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import { Waveform } from './Waveform';
 import { fmtTime, gainToDb } from '../lib/utils';
+import { PEAKS_PER_SEC, reversedPeaks } from '../lib/audio';
 
 export const CLIP_HEAD = 18;
 const HEAD = CLIP_HEAD;
@@ -47,6 +48,11 @@ export const Clip = memo(function Clip({ clip, source, zoom, height, selected, c
       >
         {missing && <TriangleAlert size={11} className="shrink-0" />}
         <span className="truncate">{clip.name}</span>
+        {clip.reversed && width > 70 && (
+          <span className="shrink-0 rounded bg-black/30 px-1 text-[9px] font-semibold uppercase tracking-wide" title="Läuft rückwärts">
+            ◀ Rev
+          </span>
+        )}
         {clip.echo && width > 90 && (
           <span className="shrink-0 rounded bg-black/30 px-1 text-[9px] font-semibold uppercase tracking-wide" title="Echo aktiv">
             Echo
@@ -71,8 +77,8 @@ export const Clip = memo(function Clip({ clip, source, zoom, height, selected, c
           <div className="p-2 text-[11px] text-red-300/80">Datei nicht gefunden</div>
         ) : (
           <Waveform
-            peaks={source.peaks}
-            offset={clip.offset}
+            peaks={clip.reversed ? reversedPeaks(source.peaks) : source.peaks}
+            offset={clip.reversed ? Math.max(0, source.peaks.length / PEAKS_PER_SEC - clip.offset - clip.duration) : clip.offset}
             duration={clip.duration}
             zoom={zoom}
             height={bodyH}
