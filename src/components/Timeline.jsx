@@ -198,6 +198,7 @@ export function Timeline({
   onAddMarker,
   onDropFiles,
   onDropSound,
+  onTrackVoice,
   onTrackChange,
   onDeleteTrack,
   onCloseGaps,
@@ -678,6 +679,7 @@ export function Timeline({
                 onBeginEdit={onBeginEdit}
                 onEndEdit={onEndEdit}
                 onReorderStart={onReorderStart}
+                onVoice={onTrackVoice}
               />
               <Lane
                 track={t}

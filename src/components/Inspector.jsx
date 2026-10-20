@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  Scissors, Trash2, Copy, WandSparkles, Blend, FolderSearch, Keyboard, Mic, Megaphone, AudioLines, StickyNote, Settings2, RefreshCw, BookmarkPlus, Sparkles, SlidersHorizontal, BookOpenText, Rewind,
+  Scissors, Trash2, Copy, WandSparkles, Blend, FolderSearch, Keyboard, Mic, Megaphone, AudioLines, StickyNote, Settings2, RefreshCw, BookmarkPlus, Sparkles, SlidersHorizontal, BookOpenText, Rewind, Drama,
 } from 'lucide-react';
 import { Button, Field, Slider, Checkbox, inputCls } from './ui';
 import { fmtTime, gainToDb, dbToGain } from '../lib/utils';
@@ -98,6 +98,9 @@ function ClipInspector({ clip, source, track, selCount = 1, onChange, onBeginEdi
 
         <div className="flex-1 flex flex-wrap content-start gap-2">
           <Button icon={Scissors} onClick={actions.split}>Teilen</Button>
+          <Button icon={Drama} onClick={actions.voice} className={clip.voice ? 'ring-1 ring-tape-500/50 text-tape-400' : ''}>
+            {clip.voice ? `Stimme: ${clip.voice.label}` : 'Stimme verwandeln'}
+          </Button>
           <Button icon={Rewind} onClick={actions.reverse} className={clip.reversed ? 'ring-1 ring-tape-500/50 text-tape-400' : ''}>
             {clip.reversed ? 'Rückwärts: an' : 'Rückwärts'}
           </Button>

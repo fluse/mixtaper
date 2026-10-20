@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Megaphone, Magnet, Trash2, Volume2, VolumeX, Headphones, Circle, GripVertical } from 'lucide-react';
+import { Megaphone, Magnet, Trash2, Volume2, VolumeX, Headphones, Circle, GripVertical, Drama } from 'lucide-react';
 
 function Toggle({ active, onClick, title, children, activeCls }) {
   return (
@@ -28,6 +28,7 @@ export const TrackHeader = memo(function TrackHeader({
   onCloseGaps,
   onBeginEdit,
   onReorderStart,
+  onVoice,
   onEndEdit,
 }) {
   return (
@@ -56,6 +57,14 @@ export const TrackHeader = memo(function TrackHeader({
             onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
             className="flex-1 min-w-0 bg-transparent text-sm font-semibold text-white rounded px-1 -mx-1 hover:bg-ink-700/60 focus:bg-ink-900 focus:outline-none"
           />
+          <button
+            type="button"
+            title={track.voice ? `Sprecher-Spur: ${track.voice.label} (ändern)` : 'Sprecher-Figur für diese Spur festlegen'}
+            onClick={() => onVoice(track.id)}
+            className={`p-0.5 ${track.voice ? 'text-tape-400' : 'text-ink-500 hover:text-white'}`}
+          >
+            <Drama size={14} />
+          </button>
           <button
             type="button"
             title="Lücken schließen (Clips aneinanderheften)"
@@ -95,6 +104,11 @@ export const TrackHeader = memo(function TrackHeader({
             <Megaphone size={12} className="mr-1" />
             Sprache
           </Toggle>
+          {track.voice && (
+            <span className="text-[10px] text-tape-400 truncate" title="Neue Aufnahmen werden automatisch verwandelt">
+              🎭 {track.voice.label}
+            </span>
+          )}
           {selected && (
             <span className="ml-auto text-[10px] text-tape-400 flex items-center gap-1" title="Aufnahmen und Importe landen in dieser Spur">
               <Headphones size={11} /> Ziel

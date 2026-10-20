@@ -8,6 +8,8 @@ import { SoundLibrary } from './components/SoundLibrary';
 import { VoiceFxDialog } from './components/VoiceFxDialog';
 import { FxDialog } from './components/FxDialog';
 import { Prompter } from './components/Prompter';
+import { VoiceDialog } from './components/VoiceDialog';
+import { transformVoiceAsync, regionMono, monoToBuffer } from './lib/voiceclient';
 import { encodeWav } from './lib/voicefx';
 import { ResizeHandle } from './components/ui';
 import { useHistory } from './lib/history';
@@ -186,6 +188,51 @@ export default function App() {
     setSrcVersion((v) => v + 1);
     return src;
   }, []);
+
+  /* ---------------------------------------------------------------- */
+  /* Stimme verwandeln                                                 */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Berechnet die verwandelte Fassung eines Clips – immer vom Original aus (voiceFrom),
+   * damit mehrfaches Ändern keine Qualität kostet. settings = null → zurück zur Original-Stimme.
+   */
+  const voiceClip = useCallback(async (c, settings) => {
+    const fromId = c.voiceFrom?.sourceId ?? c.sourceId;
+    const absOffset = c.voiceFrom ? c.voiceFrom.offset + c.offset : c.offset;
+    if (!settings) return c.voiceFrom ? { sourceId: fromId, offset: absOffset, voice: undefined, voiceFrom: undefined } : null;
+    const orig = sourcesRef.current.get(fromId);
+    if (!orig?.buffer) throw new Error('Audiodatei nicht geladen');
+    const sr = orig.buffer.sampleRate;
+    const out = await transformVoiceAsync(regionMono(orig.buffer, absOffset, c.duration), sr, settings);
+    const buffer = monoToBuffer(out, sr);
+    const name = `${stripExt(orig.name || c.name)} (${settings.label})`;
+    const path = await window.api.saveRecording(encodeWav(buffer), 'wav', name);
+    const src = { id: uid('src'), path, name, buffer, peaks: computePeaks(buffer) };
+    sourcesRef.current.set(src.id, src);
+    return { sourceId: src.id, offset: 0, voice: settings, voiceFrom: { sourceId: fromId, offset: absOffset } };
+  }, []);
+
+  const applyVoice = useCallback(
+    async (ids, settings, record = true) => {
+      const clips = docRef.current.clips.filter((c) => ids.includes(c.id));
+      const patches = new Map();
+      for (let i = 0; i < clips.length; i++) {
+        setBusy(clips.length > 1 ? `Verwandle Stimme ${i + 1}/${clips.length} …` : 'Verwandle Stimme …');
+        try {
+          const p = await voiceClip(clips[i], settings);
+          if (p) patches.set(clips[i].id, p);
+        } catch (err) {
+          notify(`„${clips[i].name}“: ${err.message}`, 'error');
+        }
+      }
+      setBusy(null);
+      setSrcVersion((v) => v + 1);
+      if (patches.size) set((d) => ({ ...d, clips: d.clips.map((c) => (patches.has(c.id) ? { ...c, ...patches.get(c.id) } : c)) }), record);
+      return patches.size;
+    },
+    [voiceClip, set, notify],
+  );
 
   /** Fügt geladene Quellen nacheinander als Clips ein. */
   const insertSources = useCallback(
@@ -474,6 +521,7 @@ export default function App() {
   /* ---------------------------------------------------------------- */
 
   const [prompter, setPrompter] = useState(null); // { text, mode: 'record' | 'rehearse' }
+  const [voiceTarget, setVoiceTarget] = useState(null); // { mode: 'clip' } | { mode: 'track', trackId }
 
   /** Vorlesetext: Notiz an/vor der Abspielposition, sonst eigener Text aus den Einstellungen. */
   const findPromptText = useCallback(() => {
@@ -585,13 +633,21 @@ export default function App() {
       };
       set((d) => ({ ...d, clips: [...d.clips, clip] }));
       setSelection({ type: 'clip', id: clip.id });
-      notify(`Aufnahme eingefügt (${fmtTime(duration, true)})`, 'success');
+      const figure = docRef.current.tracks.find((t) => t.id === r.trackId)?.voice;
+      if (figure) {
+        // Sprecher-Spur: direkt als Figur verwandeln (gleicher Undo-Schritt wie die Aufnahme)
+        setBusy(`Verwandle als „${figure.label}“ …`);
+        const patch = await voiceClip(clip, figure);
+        set((d) => ({ ...d, clips: d.clips.map((c) => (c.id === clip.id ? { ...c, ...patch } : c)) }), false);
+        setSrcVersion((v) => v + 1);
+        notify(`Aufnahme als „${figure.label}“ eingefügt (${fmtTime(duration, true)})`, 'success');
+      } else notify(`Aufnahme eingefügt (${fmtTime(duration, true)})`, 'success');
     } catch (err) {
       notify(`Aufnahme fehlgeschlagen: ${err.message}`, 'error');
     } finally {
       setBusy(null);
     }
-  }, [loadSource, notify, player, recSettings.trimSilence, set, stopPlayback]);
+  }, [loadSource, notify, player, recSettings.trimSilence, set, stopPlayback, voiceClip]);
 
   const toggleRecord = useCallback(() => (recRef.current ? stopRecording() : startRecording()), [startRecording, stopRecording]);
 
@@ -713,7 +769,12 @@ export default function App() {
       const t0 = Math.min(...sel.map((c) => c.start));
       clipboardRef.current = {
         items: sel.map((c) => ({ clip: { ...c }, rel: c.start - t0, trackIdx: d.tracks.findIndex((t) => t.id === c.trackId) })),
-        sources: new Map(sel.map((c) => [c.sourceId, sourcesRef.current.get(c.sourceId)]).filter(([, s]) => s)),
+        sources: new Map(
+          sel
+            .flatMap((c) => [c.sourceId, c.voiceFrom?.sourceId].filter(Boolean))
+            .map((id) => [id, sourcesRef.current.get(id)])
+            .filter(([, s]) => s),
+        ),
       };
       const what = sel.length === 1 ? `„${sel[0].name}“` : `${sel.length} Clips`;
       if (cut) {
@@ -878,7 +939,7 @@ export default function App() {
   const saveProject = useCallback(
     async (saveAs = false) => {
       const d = docRef.current;
-      const used = new Set(d.clips.map((c) => c.sourceId));
+      const used = new Set(d.clips.flatMap((c) => [c.sourceId, c.voiceFrom?.sourceId].filter(Boolean)));
       const sources = [...sourcesRef.current.values()]
         .filter((s) => used.has(s.id))
         .map((s) => ({ id: s.id, path: s.path, name: s.name }));
@@ -1048,6 +1109,7 @@ export default function App() {
       remove: deleteSelection,
       toLibrary: clipToLibrary,
       optimize: openVoiceFx,
+      voice: () => selection?.type === 'clip' && setVoiceTarget({ mode: 'clip' }),
       reverse: () => {
         // alle ausgewählten Clips umschalten (Richtung des angeklickten Clips gibt den neuen Wert vor)
         const ids = new Set(selectedClipIds(selection));
@@ -1060,6 +1122,50 @@ export default function App() {
     }),
     [splitAt, trimSilence, crossfade, duplicateClip, deleteSelection, clipToLibrary, openVoiceFx, selection],
   );
+
+  /** Daten für den Stimmen-Dialog (Clip- oder Spur-Modus). */
+  const sampleOf = (c) => {
+    if (!c) return null;
+    const src = sourcesRef.current.get(c.voiceFrom?.sourceId ?? c.sourceId);
+    if (!src?.buffer) return null;
+    return { buffer: src.buffer, offset: c.voiceFrom ? c.voiceFrom.offset + c.offset : c.offset, duration: c.duration, gain: c.gain };
+  };
+  const renderVoiceDialog = () => {
+    if (voiceTarget.mode === 'clip') {
+      if (!selectedClip) return null;
+      const ids = selectedClipIds(selection);
+      return (
+        <VoiceDialog
+          mode="clip"
+          title={`Stimme verwandeln – ${ids.length > 1 ? `${ids.length} Clips` : selectedClip.name}`}
+          initial={selectedClip.voice}
+          sample={sampleOf(selectedClip)}
+          onApply={(settings) => applyVoice(ids, settings)}
+          onRemove={selectedClip.voice ? () => applyVoice(ids, null) : undefined}
+          onClose={() => setVoiceTarget(null)}
+        />
+      );
+    }
+    const track = doc.tracks.find((t) => t.id === voiceTarget.trackId);
+    if (!track) return null;
+    const trackClips = doc.clips.filter((c) => c.trackId === track.id).sort((a, b) => a.start - b.start);
+    return (
+      <VoiceDialog
+        mode="track"
+        title={`Sprecher-Spur „${track.name}“`}
+        initial={track.voice}
+        sample={sampleOf(trackClips[0])}
+        trackClipCount={trackClips.length}
+        onApply={async (settings, applyExisting) => {
+          set((d) => ({ ...d, tracks: d.tracks.map((t) => (t.id === track.id ? { ...t, voice: settings } : t)) }));
+          if (applyExisting && trackClips.length) await applyVoice(trackClips.map((c) => c.id), settings, false);
+          notify(`Spur „${track.name}“ spricht jetzt als „${settings.label}“`, 'success');
+        }}
+        onRemove={track.voice ? () => set((d) => ({ ...d, tracks: d.tracks.map((t) => (t.id === track.id ? { ...t, voice: undefined } : t)) })) : undefined}
+        onClose={() => setVoiceTarget(null)}
+      />
+    );
+  };
 
   const ytDefaultTrack =
     doc.tracks.find((t) => t.id === selectedTrackId && !t.duck)?.id || doc.tracks.find((t) => !t.duck)?.id || doc.tracks[0]?.id;
@@ -1124,6 +1230,7 @@ export default function App() {
         onAddMarker={addMarker}
         onDropFiles={onDropFiles}
         onDropSound={insertSound}
+        onTrackVoice={(trackId) => setVoiceTarget({ mode: 'track', trackId })}
         onTrackChange={updateTrack}
         onDeleteTrack={deleteTrack}
         onCloseGaps={closeGaps}
@@ -1190,6 +1297,7 @@ export default function App() {
       )}
       {dialog === 'export' && <ExportDialog doc={doc} sources={sourcesRef.current} onClose={() => setDialog(null)} />}
       {dialog === 'jcard' && <JCardDialog doc={doc} onClose={() => setDialog(null)} />}
+      {voiceTarget && renderVoiceDialog()}
       {dialog === 'fx' && selectedClip && (
         <FxDialog
           clip={selectedClip}

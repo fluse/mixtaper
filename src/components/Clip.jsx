@@ -48,6 +48,11 @@ export const Clip = memo(function Clip({ clip, source, zoom, height, selected, c
       >
         {missing && <TriangleAlert size={11} className="shrink-0" />}
         <span className="truncate">{clip.name}</span>
+        {clip.voice && width > 80 && (
+          <span className="shrink-0 rounded bg-black/30 px-1 text-[9px] font-semibold tracking-wide" title={`Stimme: ${clip.voice.label}`}>
+            🎭 {clip.voice.label}
+          </span>
+        )}
         {clip.reversed && width > 70 && (
           <span className="shrink-0 rounded bg-black/30 px-1 text-[9px] font-semibold uppercase tracking-wide" title="Läuft rückwärts">
             ◀ Rev
