@@ -661,6 +661,73 @@ export default function App() {
     if (ids.length) setSelection({ type: 'clip', id: ids[ids.length - 1], ids });
   }, []);
 
+  /* ---------------------------------------------------------------- */
+  /* Zwischenablage (Strg+C / Strg+X / Strg+V)                         */
+  /* ---------------------------------------------------------------- */
+
+  // Enthält die Clips relativ zum Blockanfang plus ihre Quellen – Einfügen klappt so auch nach „Neues Projekt“.
+  const clipboardRef = useRef(null);
+
+  const copySelection = useCallback(
+    (cut = false) => {
+      const ids = new Set(selectedClipIds(selection));
+      const d = docRef.current;
+      const sel = d.clips.filter((c) => ids.has(c.id));
+      if (!sel.length) return;
+      const t0 = Math.min(...sel.map((c) => c.start));
+      clipboardRef.current = {
+        items: sel.map((c) => ({ clip: { ...c }, rel: c.start - t0, trackIdx: d.tracks.findIndex((t) => t.id === c.trackId) })),
+        sources: new Map(sel.map((c) => [c.sourceId, sourcesRef.current.get(c.sourceId)]).filter(([, s]) => s)),
+      };
+      const what = sel.length === 1 ? `„${sel[0].name}“` : `${sel.length} Clips`;
+      if (cut) {
+        set((x) => ({ ...x, clips: x.clips.filter((c) => !ids.has(c.id)) }));
+        setSelection(null);
+        notify(`${what} ausgeschnitten – Strg+V fügt an der Abspielposition ein`, 'info');
+      } else notify(`${what} kopiert – Strg+V fügt an der Abspielposition ein`, 'info');
+    },
+    [selection, set, notify],
+  );
+
+  const pasteClipboard = useCallback(() => {
+    const cb = clipboardRef.current;
+    if (!cb?.items.length) return;
+    // Quellen wieder bereitstellen, falls sie inzwischen fehlen (z. B. neues Projekt)
+    let added = false;
+    for (const [id, src] of cb.sources) {
+      if (!sourcesRef.current.has(id)) {
+        sourcesRef.current.set(id, src);
+        added = true;
+      }
+    }
+    if (added) setSrcVersion((v) => v + 1);
+
+    const d = docRef.current;
+    const at = playhead.get();
+    const fallback = d.tracks.find((t) => t.id === selectedTrackId) ? selectedTrackId : d.tracks[0]?.id;
+    const singleTrack = new Set(cb.items.map((i) => i.clip.trackId)).size === 1;
+    let tracks = d.tracks;
+    if (!tracks.length) tracks = [newTrack([], { name: 'Musik' })];
+    const targetIdx = Math.max(0, tracks.findIndex((t) => t.id === (fallback ?? tracks[0].id)));
+    const baseIdx = Math.min(...cb.items.map((i) => i.trackIdx));
+    const copies = cb.items.map(({ clip, rel, trackIdx }) => {
+      let trackId;
+      if (singleTrack) trackId = tracks[targetIdx].id; // eine Spur → in die ausgewählte Spur
+      else trackId = tracks[Math.min(tracks.length - 1, targetIdx + (trackIdx - baseIdx))].id; // Spurabstände beibehalten
+      return { ...clip, id: uid('clip'), trackId, start: at + rel };
+    });
+    set((x) => ({ ...x, tracks: x.tracks.length ? x.tracks : tracks, clips: [...x.clips, ...copies] }));
+    setSelection(
+      copies.length === 1
+        ? { type: 'clip', id: copies[0].id }
+        : { type: 'clip', id: copies[copies.length - 1].id, ids: copies.map((c) => c.id) },
+    );
+    // Abspielmarker ans Ende des eingefügten Blocks → mehrfaches Einfügen reiht aneinander
+    const end = Math.max(...copies.map(clipEnd));
+    playhead.set(end);
+    if (!player.playing) player.seek(end);
+  }, [selectedTrackId, set, player]);
+
   const trimSilence = useCallback(() => {
     if (selection?.type !== 'clip') return;
     const c = docRef.current.clips.find((x) => x.id === selection.id);
@@ -857,6 +924,9 @@ export default function App() {
       else if (ctrl && k === 'o') (e.preventDefault(), openProject());
       else if (ctrl && k === 'd') (e.preventDefault(), duplicateClip());
       else if (ctrl && k === 'a') (e.preventDefault(), selectAllClips());
+      else if (ctrl && k === 'c') (e.preventDefault(), copySelection(false));
+      else if (ctrl && k === 'x') (e.preventDefault(), copySelection(true));
+      else if (ctrl && k === 'v') (e.preventDefault(), pasteClipboard());
       else if (ctrl) return;
       else if (e.code === 'Space') (e.preventDefault(), togglePlay());
       else if (k === 'delete' || k === 'backspace') deleteSelection();
@@ -876,7 +946,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, undo, redo, saveProject, openProject, duplicateClip, selectAllClips, nudgeSelection, togglePlay, deleteSelection, splitAt, addMarker, toggleRecord, seek, applyZoom]);
+  }, [dialog, undo, redo, saveProject, openProject, duplicateClip, selectAllClips, copySelection, pasteClipboard, nudgeSelection, togglePlay, deleteSelection, splitAt, addMarker, toggleRecord, seek, applyZoom]);
 
   // Auswahl verwerfen, wenn das Objekt (z. B. durch Undo) verschwindet
   useEffect(() => {

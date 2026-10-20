@@ -48,6 +48,7 @@ Aufnahmen, YouTube-Downloads, Projekte und Exporte landen unter `Musik\MixTape\`
 | Strg+D | Clip(s) duplizieren |
 | Strg/Umschalt+Klick, Ziehen im Leeren | Mehrere Clips auswählen |
 | Strg+A | Alle Clips auswählen |
+| Strg+C / Strg+X / Strg+V | Clip(s) kopieren / ausschneiden / an der Abspielposition einfügen (in die ausgewählte Spur) |
 | ← / → (Umschalt: 1 s) | Auswahl verschieben (ohne Auswahl: Abspielposition) |
 | Strg+Z / Strg+Y | Rückgängig / Wiederholen |
 | Strg+S / Strg+Umschalt+S / Strg+O | Speichern / Speichern unter / Öffnen |

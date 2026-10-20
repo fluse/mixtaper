@@ -210,6 +210,7 @@ function ProjectSettings({ doc, onDocChange, onBeginEdit, onEndEdit }) {
               ['Strg/Umschalt+Klick', 'Mehrere Clips auswählen'],
               ['Ziehen im Leeren', 'Auswahlrahmen'],
               ['Strg+A', 'Alle Clips auswählen'],
+              ['Strg+C / X / V', 'Kopieren / Ausschneiden / an Abspielposition einfügen'],
               ['← / →', 'Auswahl verschieben (Umschalt: 1 s)'],
               ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
               ['Strg+Mausrad', 'Zoomen'],
