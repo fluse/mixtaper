@@ -105,8 +105,9 @@ ipcMain.handle('source:resolve', async (_e, { path: abs, relPath, projectPath })
   return null;
 });
 
-ipcMain.handle('recording:save', async (_e, { data, ext }) => {
-  const file = path.join(mixtapeDir('Aufnahmen'), `Aufnahme_${timestamp()}.${ext || 'webm'}`);
+ipcMain.handle('recording:save', async (_e, { data, ext, name }) => {
+  const base = name ? `${name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 80)} ${timestamp()}` : `Aufnahme_${timestamp()}`;
+  const file = path.join(mixtapeDir('Aufnahmen'), `${base}.${ext || 'webm'}`);
   await fsp.writeFile(file, Buffer.from(data));
   return file;
 });

@@ -22,6 +22,7 @@ npm run dist     # Windows-Installer bauen (Ordner release/)
 | **YouTube** | Link einfügen → Audio wird per yt-dlp geladen und eingefügt (yt-dlp wird beim ersten Mal automatisch heruntergeladen und wöchentlich aktualisiert) |
 | **Aufnahme** | Mikrofon-Aufnahme an der Abspielposition, Musik läuft mit (optional leiser, Pegel einstellbar), Stille am Anfang/Ende wird automatisch entfernt, Pegelanzeige |
 | **Bearbeiten** | Verschieben (auch zwischen Spuren), Ränder trimmen, Fade-In/-Out per Griff oder Regler, Clip-Lautstärke, Teilen (S), Duplizieren (Strg+D), Löschen (Entf), Crossfade mit Vorgänger, „Stille entfernen“, Undo/Redo |
+| **Stimme optimieren** | Pro Clip: Rumpelfilter, Klarheits-EQ, Hall-/Raumgeräusch-Reduktion (Expander mit Vorausschau), Kompressor, Lautstärke angleichen – mit Vorher/Nachher-Vergleich; speichert eine neue Datei, Original bleibt erhalten |
 | **Magnet-Modus** | Clips rasten an Clip-Kanten, Markern und Abspielposition ein; „Lücken schließen“ pro Spur |
 | **Ducking** | Spuren mit „Sprache“ senken alle anderen Spuren automatisch ab (Stärke im Projekt-Panel) |
 | **Notizen & Kapitel** | Doppelklick in die Marker-Leiste oder „M“: Notiz mit Text, Regieanweisung und Farbe; optional als Kapitelmarke |

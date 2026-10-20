@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('api', {
       return '';
     }
   },
-  saveRecording: (data, ext) => ipcRenderer.invoke('recording:save', { data, ext }),
+  saveRecording: (data, ext, name) => ipcRenderer.invoke('recording:save', { data, ext, name }),
   writeText: (path, text) => ipcRenderer.invoke('file:writeText', { path, text }),
   showItem: (p) => ipcRenderer.invoke('shell:showItem', p),
 

@@ -5,6 +5,8 @@ import { Timeline, HEADER_W } from './components/Timeline';
 import { Inspector } from './components/Inspector';
 import { YouTubeDialog, ExportDialog, JCardDialog } from './components/Dialogs';
 import { SoundLibrary } from './components/SoundLibrary';
+import { VoiceFxDialog } from './components/VoiceFxDialog';
+import { encodeWav } from './lib/voicefx';
 import { ResizeHandle } from './components/ui';
 import { useHistory } from './lib/history';
 import { playhead } from './lib/playhead';
@@ -861,6 +863,37 @@ export default function App() {
     addToLibrary([{ path: src.path, name: c.name, offset: c.offset, duration: c.duration }]);
   }, [selection, addToLibrary, notify]);
 
+  const selectedClip = selection?.type === 'clip' ? doc.clips.find((c) => c.id === selection.id) : null;
+
+  const openVoiceFx = useCallback(() => {
+    const c = selection?.type === 'clip' && docRef.current.clips.find((x) => x.id === selection.id);
+    if (!sourcesRef.current.get(c?.sourceId)?.buffer) {
+      notify('Für diesen Clip ist keine Audiodatei geladen.', 'error');
+      return;
+    }
+    setDialog('voicefx');
+  }, [selection, notify]);
+
+  /** Optimierte Fassung als neue Datei speichern und dem Clip zuweisen (Original bleibt erhalten). */
+  const applyVoiceFx = useCallback(
+    async (buffer) => {
+      const c = docRef.current.clips.find((x) => x.id === selection?.id);
+      if (!c || !buffer) return;
+      const name = `${c.name.replace(/ \(optimiert\)$/, '')} (optimiert)`;
+      try {
+        const path = await window.api.saveRecording(encodeWav(buffer), 'wav', name);
+        const src = { id: uid('src'), path, name, buffer, peaks: computePeaks(buffer) };
+        sourcesRef.current.set(src.id, src);
+        setSrcVersion((v) => v + 1);
+        updateClip(c.id, { sourceId: src.id, name });
+        notify('Stimme optimiert', 'success');
+      } catch (err) {
+        notify(`Speichern fehlgeschlagen: ${err.message}`, 'error');
+      }
+    },
+    [selection, updateClip, notify],
+  );
+
   const clipActions = useMemo(
     () => ({
       split: () => splitAt(),
@@ -869,8 +902,9 @@ export default function App() {
       duplicate: duplicateClip,
       remove: deleteSelection,
       toLibrary: clipToLibrary,
+      optimize: openVoiceFx,
     }),
-    [splitAt, trimSilence, crossfade, duplicateClip, deleteSelection, clipToLibrary],
+    [splitAt, trimSilence, crossfade, duplicateClip, deleteSelection, clipToLibrary, openVoiceFx],
   );
 
   const ytDefaultTrack =
@@ -999,6 +1033,14 @@ export default function App() {
       )}
       {dialog === 'export' && <ExportDialog doc={doc} sources={sourcesRef.current} onClose={() => setDialog(null)} />}
       {dialog === 'jcard' && <JCardDialog doc={doc} onClose={() => setDialog(null)} />}
+      {dialog === 'voicefx' && selectedClip && sourcesRef.current.get(selectedClip.sourceId)?.buffer && (
+        <VoiceFxDialog
+          clip={selectedClip}
+          source={sourcesRef.current.get(selectedClip.sourceId)}
+          onApply={applyVoiceFx}
+          onClose={() => setDialog(null)}
+        />
+      )}
 
       {busy && (
         <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center">
