@@ -26,7 +26,7 @@ function Panel({ children }) {
   return <div className="h-full">{children}</div>;
 }
 
-function ClipInspector({ clip, source, track, onChange, onBeginEdit, onEndEdit, actions }) {
+function ClipInspector({ clip, source, track, selCount = 1, onChange, onBeginEdit, onEndEdit, actions }) {
   const sel = (fn) => (v) => onChange(fn(v), false);
   return (
     <Panel>
@@ -45,6 +45,11 @@ function ClipInspector({ clip, source, track, onChange, onBeginEdit, onEndEdit, 
           <div className="text-xs text-ink-400 leading-relaxed">
             <span className="inline-block size-2 rounded-full mr-1.5" style={{ background: track?.color }} />
             {track?.name} · Start {fmtTime(clip.start, true)} · Länge {fmtTime(clip.duration, true)}
+            {selCount > 1 && (
+              <span className="block mt-1 text-tape-400">
+                {selCount} Clips ausgewählt – ziehen oder ←/→ verschiebt alle, Entf löscht alle, Strg+D dupliziert alle.
+              </span>
+            )}
             {source?.path && (
               <button
                 type="button"
@@ -201,7 +206,11 @@ function ProjectSettings({ doc, onDocChange, onBeginEdit, onEndEdit }) {
               ['M', 'Notiz/Marker setzen'],
               ['Entf', 'Auswahl löschen'],
               ['Esc', 'Auswahl aufheben'],
-              ['Strg+D', 'Clip duplizieren'],
+              ['Strg+D', 'Clip(s) duplizieren'],
+              ['Strg/Umschalt+Klick', 'Mehrere Clips auswählen'],
+              ['Ziehen im Leeren', 'Auswahlrahmen'],
+              ['Strg+A', 'Alle Clips auswählen'],
+              ['← / →', 'Auswahl verschieben (Umschalt: 1 s)'],
               ['Strg+Z / Strg+Y', 'Rückgängig / Wiederholen'],
               ['Strg+Mausrad', 'Zoomen'],
               ['Strg+S / Strg+O', 'Speichern / Öffnen'],
@@ -353,6 +362,7 @@ export function Inspector(props) {
         onBeginEdit={props.onBeginEdit}
         onEndEdit={props.onEndEdit}
         actions={props.clipActions}
+        selCount={props.selCount}
       />
     );
   } else if (active === 'selection' && marker) {

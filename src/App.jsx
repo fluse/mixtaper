@@ -13,7 +13,7 @@ import { playhead } from './lib/playhead';
 import { Player } from './lib/engine';
 import { computeMiniWave, computePeaks, decodeAudio, detectSound, getAudioContext } from './lib/audio';
 import {
-  basename, clamp, clipEnd, emptyDoc, fmtTime, isTypingTarget, newTrack, projectDuration, stripExt, trackEnd, uid,
+  basename, clamp, clipEnd, emptyDoc, fmtTime, isTypingTarget, newTrack, projectDuration, selectedClipIds, stripExt, trackEnd, uid,
 } from './lib/utils';
 
 const toArrayBuffer = (u8) => u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
@@ -596,7 +596,10 @@ export default function App() {
 
   const deleteSelection = useCallback(() => {
     if (!selection) return;
-    if (selection.type === 'clip') set((d) => ({ ...d, clips: d.clips.filter((c) => c.id !== selection.id) }));
+    if (selection.type === 'clip') {
+      const ids = new Set(selectedClipIds(selection));
+      set((d) => ({ ...d, clips: d.clips.filter((c) => !ids.has(c.id)) }));
+    }
     if (selection.type === 'marker') set((d) => ({ ...d, markers: d.markers.filter((m) => m.id !== selection.id) }));
     setSelection(null);
   }, [selection, set]);
@@ -626,13 +629,37 @@ export default function App() {
   );
 
   const duplicateClip = useCallback(() => {
-    if (selection?.type !== 'clip') return;
-    const c = docRef.current.clips.find((x) => x.id === selection.id);
-    if (!c) return;
-    const copy = { ...c, id: uid('clip'), start: clipEnd(c) };
-    set((d) => ({ ...d, clips: [...d.clips, copy] }));
-    setSelection({ type: 'clip', id: copy.id });
+    const ids = selectedClipIds(selection);
+    const sel = docRef.current.clips.filter((x) => ids.includes(x.id));
+    if (!sel.length) return;
+    // Auswahl als Block direkt hinter sich selbst kopieren
+    const span = Math.max(...sel.map(clipEnd)) - Math.min(...sel.map((c) => c.start));
+    const copies = sel.map((c) => ({ ...c, id: uid('clip'), start: c.start + span }));
+    set((d) => ({ ...d, clips: [...d.clips, ...copies] }));
+    setSelection(
+      copies.length === 1
+        ? { type: 'clip', id: copies[0].id }
+        : { type: 'clip', id: copies[copies.length - 1].id, ids: copies.map((c) => c.id) },
+    );
   }, [selection, set]);
+
+  /** Ausgewählte Clips gemeinsam um dt Sekunden verschieben (nicht vor 0). */
+  const nudgeSelection = useCallback(
+    (dt) => {
+      const ids = new Set(selectedClipIds(selection));
+      const sel = docRef.current.clips.filter((c) => ids.has(c.id));
+      if (!sel.length) return false;
+      const delta = Math.max(dt, -Math.min(...sel.map((c) => c.start)));
+      if (delta) set((d) => ({ ...d, clips: d.clips.map((c) => (ids.has(c.id) ? { ...c, start: c.start + delta } : c)) }));
+      return true;
+    },
+    [selection, set],
+  );
+
+  const selectAllClips = useCallback(() => {
+    const ids = docRef.current.clips.map((c) => c.id);
+    if (ids.length) setSelection({ type: 'clip', id: ids[ids.length - 1], ids });
+  }, []);
 
   const trimSilence = useCallback(() => {
     if (selection?.type !== 'clip') return;
@@ -829,13 +856,19 @@ export default function App() {
       else if (ctrl && k === 's') (e.preventDefault(), saveProject(e.shiftKey));
       else if (ctrl && k === 'o') (e.preventDefault(), openProject());
       else if (ctrl && k === 'd') (e.preventDefault(), duplicateClip());
+      else if (ctrl && k === 'a') (e.preventDefault(), selectAllClips());
       else if (ctrl) return;
       else if (e.code === 'Space') (e.preventDefault(), togglePlay());
       else if (k === 'delete' || k === 'backspace') deleteSelection();
       else if (k === 's') splitAt();
       else if (k === 'm') addMarker();
       else if (k === 'r') toggleRecord();
-      else if (k === 'home') seek(0);
+      else if (k === 'arrowleft' || k === 'arrowright') {
+        e.preventDefault();
+        const dir = k === 'arrowleft' ? -1 : 1;
+        // Clips verschieben, sonst Abspielposition
+        if (!nudgeSelection(dir * (e.shiftKey ? 1 : 0.1))) seek(playhead.get() + dir * (e.shiftKey ? 5 : 1));
+      } else if (k === 'home') seek(0);
       else if (k === 'end') seek(projectDuration(docRef.current));
       else if (k === '+' || k === '=') applyZoom(1.5);
       else if (k === '-') applyZoom(1 / 1.5);
@@ -843,11 +876,16 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, undo, redo, saveProject, openProject, duplicateClip, togglePlay, deleteSelection, splitAt, addMarker, toggleRecord, seek, applyZoom]);
+  }, [dialog, undo, redo, saveProject, openProject, duplicateClip, selectAllClips, nudgeSelection, togglePlay, deleteSelection, splitAt, addMarker, toggleRecord, seek, applyZoom]);
 
   // Auswahl verwerfen, wenn das Objekt (z. B. durch Undo) verschwindet
   useEffect(() => {
-    if (selection?.type === 'clip' && !doc.clips.some((c) => c.id === selection.id)) setSelection(null);
+    if (selection?.type === 'clip') {
+      const ids = selectedClipIds(selection).filter((id) => doc.clips.some((c) => c.id === id));
+      if (!ids.length) setSelection(null);
+      else if (ids.length !== selectedClipIds(selection).length || !ids.includes(selection.id))
+        setSelection(ids.length === 1 ? { type: 'clip', id: ids[0] } : { type: 'clip', id: ids.includes(selection.id) ? selection.id : ids[0], ids });
+    }
     if (selection?.type === 'marker' && !doc.markers.some((m) => m.id === selection.id)) setSelection(null);
     if (selectedTrackId && !doc.tracks.some((t) => t.id === selectedTrackId)) setSelectedTrackId(doc.tracks[0]?.id);
   }, [doc, selection, selectedTrackId]);
@@ -1004,6 +1042,7 @@ export default function App() {
         onBeginEdit={beginEdit}
         onEndEdit={endEdit}
         clipActions={clipActions}
+        selCount={selectedClipIds(selection).length}
         recSettings={recSettings}
         setRecSettings={setRecSettings}
       />

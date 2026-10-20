@@ -3,7 +3,7 @@ import { Plus, Upload, Mic, Youtube, StickyNote, Flag, X, FolderOpen, FileAudio 
 import { Clip, CLIP_HEAD, GAIN_MIN_DB, GAIN_MAX_DB } from './Clip';
 import { TrackHeader } from './TrackHeader';
 import { usePlayhead, playhead } from '../lib/playhead';
-import { clamp, clipEnd, dbToGain, fmtTime, gainToDb, projectDuration } from '../lib/utils';
+import { clamp, clipEnd, dbToGain, fmtTime, gainToDb, projectDuration, selectedClipIds } from '../lib/utils';
 
 export const HEADER_W = 248;
 const RULER_H = 26;
@@ -129,7 +129,7 @@ const MarkerGuides = memo(function MarkerGuides({ markers, zoom }) {
 /* Spur-Inhalt                                                         */
 /* ------------------------------------------------------------------ */
 
-const Lane = memo(function Lane({ track, clips, sources, zoom, width, selectedClipId, onLaneDown, onClipDown, onGainReset, dropHover }) {
+const Lane = memo(function Lane({ track, clips, sources, zoom, width, selectedIds, onLaneDown, onClipDown, onGainReset, dropHover }) {
   const sorted = useMemo(() => [...clips].sort((a, b) => a.start - b.start), [clips]);
   const gaps = [];
   for (let i = 0; i + 1 < sorted.length; i++) {
@@ -163,7 +163,7 @@ const Lane = memo(function Lane({ track, clips, sources, zoom, width, selectedCl
           source={sources.get(c.sourceId)}
           zoom={zoom}
           height={TRACK_H - 8}
-          selected={c.id === selectedClipId}
+          selected={selectedIds.has(c.id)}
           color={track.color}
           onHandleDown={onClipDown}
           onGainReset={onGainReset}
@@ -216,6 +216,10 @@ export function Timeline({
   const [viewW, setViewW] = useState(1200);
   const [dropTrack, setDropTrack] = useState(null);
   const [reorder, setReorder] = useState(null); // { trackId, insert }
+  const [marquee, setMarquee] = useState(null); // { t0, t1, y0, y1 } in Spur-Koordinaten
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const selectedIds = useMemo(() => new Set(selectedClipIds(selection)), [selection]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -253,10 +257,22 @@ export function Timeline({
     (e, clip, mode) => {
       e.stopPropagation();
       e.preventDefault();
-      onSelect({ type: 'clip', id: clip.id });
+      const curIds = selectedClipIds(selectionRef.current);
+      if (mode === 'move' && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+        // Auswahl erweitern bzw. Clip wieder abwählen
+        const ids = curIds.includes(clip.id) ? curIds.filter((id) => id !== clip.id) : [...curIds, clip.id];
+        onSelect(ids.length ? { type: 'clip', id: ids.includes(clip.id) ? clip.id : ids[ids.length - 1], ids } : null);
+        return;
+      }
+      const group = mode === 'move' && curIds.length > 1 && curIds.includes(clip.id) ? curIds : null;
+      onSelect(group ? { type: 'clip', id: clip.id, ids: group } : { type: 'clip', id: clip.id });
       onSelectTrack(clip.trackId);
 
       const snapshot = docRef.current;
+      const trackIdx = (id) => snapshot.tracks.findIndex((t) => t.id === id);
+      const groupOrig = group
+        ? snapshot.clips.filter((c) => group.includes(c.id)).map((c) => ({ id: c.id, start: c.start, idx: trackIdx(c.trackId) }))
+        : null;
       const orig = { ...clip, fadeIn: clip.fadeIn || 0, fadeOut: clip.fadeOut || 0 };
       const x0 = e.clientX;
       const y0 = e.clientY;
@@ -268,7 +284,9 @@ export function Timeline({
             0,
             playhead.get(),
             ...snapshot.markers.map((m) => m.time),
-            ...snapshot.clips.filter((c) => c.id !== clip.id).flatMap((c) => [c.start, clipEnd(c)]),
+            ...snapshot.clips
+              .filter((c) => (group ? !group.includes(c.id) : c.id !== clip.id))
+              .flatMap((c) => [c.start, clipEnd(c)]),
           ]
         : [];
       const snap = (t) => {
@@ -299,6 +317,24 @@ export function Timeline({
           else if (s2 != null) start = Math.max(0, s2 - orig.duration);
           const tracks = docRef.current.tracks;
           const idx = clamp(trackIndexAt(ev.clientY), 0, tracks.length - 1);
+          if (groupOrig) {
+            // Ganze Auswahl gemeinsam verschieben – kein Clip vor 0, keine Spur außerhalb
+            const delta = Math.max(start - orig.start, -Math.min(...groupOrig.map((g) => g.start)));
+            const idxs = groupOrig.map((g) => g.idx);
+            const tDelta = clamp(idx - trackIdx(clip.trackId), -Math.min(...idxs), tracks.length - 1 - Math.max(...idxs));
+            const byId = new Map(groupOrig.map((g) => [g.id, g]));
+            set(
+              (d) => ({
+                ...d,
+                clips: d.clips.map((c) => {
+                  const g = byId.get(c.id);
+                  return g ? { ...c, start: g.start + delta, trackId: tracks[g.idx + tDelta].id } : c;
+                }),
+              }),
+              false,
+            );
+            return;
+          }
           patch = { start, trackId: tracks[idx].id };
         } else if (mode === 'trim-l') {
           let ns = orig.start + clamp(dt, -Math.min(orig.offset, orig.start), orig.duration - 0.1);
@@ -415,11 +451,46 @@ export function Timeline({
   const onLaneDown = useCallback(
     (e, trackId) => {
       if (e.button !== 0) return;
-      onSelect(null);
-      onSelectTrack(trackId);
-      onSeek(timeAt(e.clientX));
+      const additive = e.ctrlKey || e.metaKey || e.shiftKey;
+      const base = additive ? selectedClipIds(selectionRef.current) : [];
+      const x0 = e.clientX;
+      const y0 = e.clientY;
+      const startT = timeAt(x0);
+      const startY = y0 - tracksRef.current.getBoundingClientRect().top;
+      let dragging = false;
+
+      const move = (ev) => {
+        if (!dragging && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+        dragging = true;
+        const t = timeAt(ev.clientX);
+        const y = ev.clientY - tracksRef.current.getBoundingClientRect().top;
+        const box = { t0: Math.min(startT, t), t1: Math.max(startT, t), y0: Math.min(startY, y), y1: Math.max(startY, y) };
+        setMarquee(box);
+        const i0 = Math.floor(box.y0 / TRACK_H);
+        const i1 = Math.floor(box.y1 / TRACK_H);
+        const d = docRef.current;
+        const hit = d.clips
+          .filter((c) => {
+            const ti = d.tracks.findIndex((tr) => tr.id === c.trackId);
+            return ti >= i0 && ti <= i1 && c.start < box.t1 && clipEnd(c) > box.t0;
+          })
+          .map((c) => c.id);
+        const ids = [...new Set([...base, ...hit])];
+        onSelect(ids.length ? { type: 'clip', id: ids[ids.length - 1], ids } : null);
+      };
+      const up = (ev) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        setMarquee(null);
+        if (dragging) return;
+        if (!additive) onSelect(null);
+        onSelectTrack(trackId);
+        onSeek(timeAt(ev.clientX));
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
     },
-    [onSelect, onSelectTrack, onSeek, timeAt],
+    [onSelect, onSelectTrack, onSeek, timeAt, docRef],
   );
 
   const onScrub = useCallback(
@@ -517,7 +588,6 @@ export function Timeline({
     if (files.length) onDropFiles(files, dropTarget(e), timeAt(e.clientX));
   };
 
-  const selectedClipId = selection?.type === 'clip' ? selection.id : null;
   const selectedMarkerId = selection?.type === 'marker' ? selection.id : null;
   const empty = doc.clips.length === 0;
 
@@ -556,6 +626,17 @@ export function Timeline({
 
         {/* Spuren */}
         <div ref={tracksRef} className="relative">
+          {marquee && (
+            <div
+              className="absolute border border-tape-400 bg-tape-500/10 rounded-sm z-[44] pointer-events-none"
+              style={{
+                left: HEADER_W + marquee.t0 * zoom,
+                width: (marquee.t1 - marquee.t0) * zoom,
+                top: marquee.y0,
+                height: marquee.y1 - marquee.y0,
+              }}
+            />
+          )}
           {reorder && (
             <div
               className="absolute left-0 right-0 h-0.5 bg-tape-400 z-[45] pointer-events-none shadow-[0_0_8px_rgba(255,93,143,0.9)]"
@@ -585,7 +666,7 @@ export function Timeline({
                 srcVersion={srcVersion}
                 zoom={zoom}
                 width={width}
-                selectedClipId={selectedClipId}
+                selectedIds={selectedIds}
                 onLaneDown={onLaneDown}
                 onClipDown={onClipDown}
                 onGainReset={onGainReset}

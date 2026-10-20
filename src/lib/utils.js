@@ -62,6 +62,12 @@ export function effectiveTrackGain(track, tracks) {
   return track.volume;
 }
 
+/** IDs aller ausgewählten Clips (Einzel- oder Mehrfachauswahl). */
+export function selectedClipIds(selection) {
+  if (selection?.type !== 'clip') return [];
+  return selection.ids ?? [selection.id];
+}
+
 export function isTypingTarget(el) {
   if (!el) return false;
   const tag = el.tagName;
