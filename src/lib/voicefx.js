@@ -1,12 +1,16 @@
 /**
- * Sprach-Optimierung für Aufnahmen: Rumpelfilter, Klarheits-EQ, Hall-/Raumreduktion (Expander),
- * Kompressor und Lautstärke-Angleichung. Arbeitet offline auf einem AudioBuffer.
+ * Sprach-Optimierung für Aufnahmen: Rumpelfilter, Klarheits-EQ, Wärme, Hall-/Raumreduktion (Expander),
+ * Kompressor, De-Esser, Sättigung und Lautstärke-Angleichung. Arbeitet offline auf einem AudioBuffer.
  */
 
+const BASE = { highpass: true, clarity: 1, warmth: 0, dereverb: 0.5, compress: 0.35, deess: 0, saturate: 0, vintage: false, normalize: true, target: -18 };
+
 export const VOICE_PRESETS = {
-  sanft: { label: 'Sanft', highpass: true, clarity: 0.5, dereverb: 0.4, compress: 0.2, normalize: true },
-  standard: { label: 'Standard', highpass: true, clarity: 1, dereverb: 0.65, compress: 0.35, normalize: true },
-  kraeftig: { label: 'Kräftig', highpass: true, clarity: 1.4, dereverb: 0.95, compress: 0.55, normalize: true },
+  radio: { ...BASE, label: 'Radio', clarity: 1.3, warmth: 0.7, dereverb: 0.6, compress: 0.85, deess: 0.6, saturate: 0.35, target: -15 },
+  standard: { ...BASE, label: 'Standard', clarity: 1, dereverb: 0.65, compress: 0.35 },
+  sanft: { ...BASE, label: 'Sanft', clarity: 0.5, dereverb: 0.4, compress: 0.2 },
+  kraeftig: { ...BASE, label: 'Kräftig', clarity: 1.4, dereverb: 0.95, compress: 0.55, deess: 0.3 },
+  altradio: { ...BASE, label: 'Altes Radio', clarity: 0.4, vintage: true, dereverb: 0.5, compress: 0.8, saturate: 0.7, target: -16 },
 };
 
 const db = (x) => 20 * Math.log10(x + 1e-9);
@@ -27,6 +31,23 @@ function filterChain(oc, src, o) {
     node.connect(n);
     node = n;
   };
+  const filt = (type, freq, q, gain = 0) => {
+    const f = oc.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    f.gain.value = gain;
+    add(f);
+  };
+  if (o.vintage) {
+    // Altes Radio / Transistor: schmales Band, etwas „Nase“ in den Mitten
+    filt('highpass', 380, 0.9);
+    filt('highpass', 380, 0.9);
+    filt('lowpass', 3200, 0.9);
+    filt('lowpass', 3200, 0.9);
+    filt('peaking', 1400, 1.2, 4);
+  }
+  if (o.warmth > 0) filt('lowshelf', 140, 0.7, 5 * o.warmth); // Nahbesprechungs-Wärme
   if (o.highpass) {
     const hp = oc.createBiquadFilter();
     hp.type = 'highpass';
@@ -163,8 +184,61 @@ function applyGain(buffer, gain) {
   for (const d of channels(buffer)) for (let i = 0; i < d.length; i++) d[i] *= gain[i];
 }
 
+/**
+ * De-Esser: senkt nur das Band über ~5 kHz ab, wenn es im Verhältnis zur Stimme zu laut wird (S-, Z-, Sch-Laute).
+ */
+async function deess(buffer, amount) {
+  const sr = buffer.sampleRate;
+  const chain = (type, freq) => (oc, src) => {
+    const a = oc.createBiquadFilter();
+    a.type = type;
+    a.frequency.value = freq;
+    const b = oc.createBiquadFilter();
+    b.type = type;
+    b.frequency.value = freq;
+    src.connect(a);
+    a.connect(b);
+    return b;
+  };
+  // Erkennung über steilen Hochpass; abgesenkt wird das phasenrichtige Gegenstück „Signal − Tiefpass“,
+  // sonst würden sich die S-Laute wegen der Filter-Phasenverschiebung nur teilweise auslöschen.
+  const det = await render(buffer, chain('highpass', 5500));
+  const lp = await render(buffer, chain('lowpass', 4500));
+  const chs = channels(buffer);
+  const lps = channels(lp);
+  const hbs = chs.map((d, c) => {
+    const h = new Float32Array(d.length);
+    for (let i = 0; i < d.length; i++) h[i] = d[i] - lps[c][i];
+    return h;
+  });
+  const full = envelope(chs, sr, 0.001, 0.03);
+  const high = envelope(channels(det), sr, 0.001, 0.03);
+  const [speech] = quantiles(full, sr, [0.9]);
+  const floorDb = db(speech) - 30;
+  const thr = -9 + 6 * (1 - amount); // Abstand Hochton-Band zu Gesamtsignal, ab dem eingegriffen wird
+  const maxCut = 4 + 10 * amount;
+  const att = Math.exp(-1 / (0.001 * sr));
+  const rel = Math.exp(-1 / (0.04 * sr));
+  let g = 1;
+  for (let i = 0; i < full.length; i++) {
+    const hDb = db(high[i]);
+    const over = hDb > floorDb ? hDb - db(full[i]) - thr : -1;
+    const tg = over > 0 ? Math.pow(10, -Math.min(maxCut, over * 2) / 20) : 1;
+    const k = tg < g ? att : rel;
+    g = k * g + (1 - k) * tg;
+    if (g < 0.999) for (let c = 0; c < chs.length; c++) chs[c][i] -= hbs[c][i] * (1 - g);
+  }
+}
+
+/** Sanfte Sättigung (Röhren-/Bandcharakter): verdichtet und macht die Stimme „griffiger“. */
+function saturate(buffer, amount) {
+  const k = 1 + 3 * amount;
+  const norm = 1 / Math.tanh(k);
+  for (const d of channels(buffer)) for (let i = 0; i < d.length; i++) d[i] = Math.tanh(k * d[i]) * norm;
+}
+
 /** Sprachpegel auf ca. −18 dBFS (RMS der gesprochenen Teile), Spitzen höchstens −1 dBFS. */
-function normalize(buffer) {
+function normalize(buffer, target = -18) {
   const sr = buffer.sampleRate;
   const chs = channels(buffer);
   const win = Math.floor(sr * 0.02);
@@ -190,7 +264,7 @@ function normalize(buffer) {
   }
   if (!cnt || peak <= 0) return;
   const rms = Math.sqrt(sum / cnt);
-  const gain = Math.min(Math.pow(10, -18 / 20) / rms, 0.891 / peak);
+  const gain = Math.min(Math.pow(10, target / 20) / rms, 0.891 / peak);
   for (const d of chs) for (let i = 0; i < d.length; i++) d[i] *= gain;
 }
 
@@ -200,8 +274,14 @@ export async function processVoice(buffer, o) {
   // wird aber erst danach angewendet – sonst würde der Kompressor die Hallfahnen wieder anheben.
   const exp = o.dereverb > 0 ? expanderGain(out, o.dereverb) : null;
   if (o.compress > 0) compress(out, o.compress);
+  if (o.deess > 0) await deess(out, o.deess); // nach dem Kompressor, der S-Laute mit anhebt
   if (exp) applyGain(out, exp);
-  if (o.normalize) normalize(out);
+  if (o.saturate > 0) {
+    // vor der Sättigung auf einen definierten Pegel bringen, damit sie unabhängig von der Aufnahme wirkt
+    normalize(out, -16);
+    saturate(out, o.saturate);
+  }
+  if (o.normalize) normalize(out, o.target ?? -18);
   return out;
 }
 

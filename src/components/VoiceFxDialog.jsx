@@ -21,8 +21,8 @@ function Wave({ buffer, offset, duration, color }) {
 }
 
 export function VoiceFxDialog({ clip, source, onApply, onClose }) {
-  const [opts, setOpts] = useState({ ...VOICE_PRESETS.standard });
-  const [preset, setPreset] = useState('standard');
+  const [opts, setOpts] = useState({ ...VOICE_PRESETS.radio });
+  const [preset, setPreset] = useState('radio');
   const [processed, setProcessed] = useState(null);
   const [working, setWorking] = useState(false);
   const [playing, setPlaying] = useState(null); // 'orig' | 'fx'
@@ -126,7 +126,7 @@ export function VoiceFxDialog({ clip, source, onApply, onClose }) {
       <div className="flex gap-6">
         <div className="w-72 shrink-0 flex flex-col gap-4">
           <Field label="Voreinstellung">
-            <div className="flex gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               {Object.entries(VOICE_PRESETS).map(([k, p]) => (
                 <button
                   key={k}
@@ -135,7 +135,7 @@ export function VoiceFxDialog({ clip, source, onApply, onClose }) {
                     setPreset(k);
                     setOpts({ ...p });
                   }}
-                  className={`flex-1 h-8 rounded-lg text-sm ${
+                  className={`h-8 rounded-lg text-sm ${
                     preset === k ? 'bg-tape-500/20 text-tape-400 ring-1 ring-tape-500/40' : 'bg-ink-700 hover:bg-ink-600 text-ink-200'
                   }`}
                 >
@@ -148,13 +148,23 @@ export function VoiceFxDialog({ clip, source, onApply, onClose }) {
           <Field label="Klarheit (EQ)">
             <Slider value={opts.clarity} min={0} max={1.5} step={0.05} onChange={(v) => set({ clarity: v })} format={(v) => `${Math.round(v * 100)}%`} />
           </Field>
+          <Field label="Wärme (Tiefen)">
+            <Slider value={opts.warmth} min={0} max={1} step={0.05} onChange={(v) => set({ warmth: v })} format={(v) => `${Math.round(v * 100)}%`} />
+          </Field>
           <Field label="Hall & Raumgeräusch reduzieren">
             <Slider value={opts.dereverb} min={0} max={1} step={0.05} onChange={(v) => set({ dereverb: v })} format={(v) => `${Math.round(v * 100)}%`} />
           </Field>
           <Field label="Kompressor (gleichmäßiger)">
             <Slider value={opts.compress} min={0} max={1} step={0.05} onChange={(v) => set({ compress: v })} format={(v) => `${Math.round(v * 100)}%`} />
           </Field>
-          <Checkbox checked={opts.normalize} onChange={(v) => set({ normalize: v })} label="Lautstärke angleichen" hint="Sprache auf einheitlichen Pegel (−18 dB), Spitzen max. −1 dB." />
+          <Field label="De-Esser (scharfe S-Laute)">
+            <Slider value={opts.deess} min={0} max={1} step={0.05} onChange={(v) => set({ deess: v })} format={(v) => `${Math.round(v * 100)}%`} />
+          </Field>
+          <Field label="Sättigung (Dichte)">
+            <Slider value={opts.saturate} min={0} max={1} step={0.05} onChange={(v) => set({ saturate: v })} format={(v) => `${Math.round(v * 100)}%`} />
+          </Field>
+          <Checkbox checked={opts.vintage} onChange={(v) => set({ vintage: v })} label="Alter Radio-Klang" hint="Schmales Frequenzband wie Mittelwelle / Transistorradio." />
+          <Checkbox checked={opts.normalize} onChange={(v) => set({ normalize: v })} label="Lautstärke angleichen" hint={`Sprache auf einheitlichen Pegel (${opts.target ?? -18} dB), Spitzen max. −1 dB.`} />
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col gap-3">
