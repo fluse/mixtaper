@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  Scissors, Trash2, Copy, WandSparkles, Blend, FolderSearch, Keyboard, Mic, Megaphone, AudioLines, StickyNote, Settings2, RefreshCw, BookmarkPlus, Sparkles, SlidersHorizontal,
+  Scissors, Trash2, Copy, WandSparkles, Blend, FolderSearch, Keyboard, Mic, Megaphone, AudioLines, StickyNote, Settings2, RefreshCw, BookmarkPlus, Sparkles, SlidersHorizontal, BookOpenText,
 } from 'lucide-react';
 import { Button, Field, Slider, Checkbox, inputCls } from './ui';
 import { fmtTime, gainToDb, dbToGain } from '../lib/utils';
@@ -117,7 +117,7 @@ function ClipInspector({ clip, source, track, selCount = 1, onChange, onBeginEdi
   );
 }
 
-function MarkerInspector({ marker, onChange, onBeginEdit, onEndEdit, onRemove }) {
+function MarkerInspector({ marker, onChange, onBeginEdit, onEndEdit, onRemove, onRehearse, onRecordText }) {
   return (
     <Panel>
       <div className="flex gap-6 min-h-full">
@@ -151,6 +151,16 @@ function MarkerInspector({ marker, onChange, onBeginEdit, onEndEdit, onRemove })
             label="Als Kapitelmarke exportieren"
             hint="Kapitel im MP3, CUE-Sheet und Tracklist."
           />
+          <div className="flex flex-wrap gap-2">
+            <Button icon={BookOpenText} onClick={() => onRehearse(marker)} disabled={!marker.note?.trim()}>
+              Probelesen
+            </Button>
+            <span title="Mit diesem Text als Vorlesehilfe aufnehmen (ab dieser Notiz)">
+              <Button icon={Mic} variant="primary" onClick={() => onRecordText(marker)} disabled={!marker.note?.trim()}>
+                Aufnehmen
+              </Button>
+            </span>
+          </div>
           <Button icon={Trash2} variant="danger" onClick={onRemove} className="self-start">
             Marker löschen
           </Button>
@@ -333,6 +343,33 @@ function RecordingSettings({ recSettings, setRecSettings }) {
             label="Stille am Anfang/Ende automatisch wegschneiden"
           />
         </div>
+
+        <div className="w-96 shrink-0 flex flex-col gap-2">
+          <Checkbox
+            checked={recSettings.prompter}
+            onChange={(v) => setRecSettings((s) => ({ ...s, prompter: v }))}
+            label="Vorlesehilfe (Karaoke) beim Aufnehmen"
+            hint="Zeigt den Text der Notiz an bzw. vor der Abspielposition Wort für Wort im Takt."
+          />
+          <Field label="Lesetempo">
+            <Slider
+              value={recSettings.wpm}
+              min={60}
+              max={260}
+              step={5}
+              onChange={(v) => setRecSettings((s) => ({ ...s, wpm: v }))}
+              format={(v) => `${v} W/min`}
+            />
+          </Field>
+          <Field label="Eigener Text (falls keine Notiz mit Text da ist)">
+            <textarea
+              className={`${inputCls} h-16 py-1.5 resize-y`}
+              value={recSettings.promptText}
+              placeholder="Hallo Lea, …"
+              onChange={(e) => setRecSettings((s) => ({ ...s, promptText: e.target.value }))}
+            />
+          </Field>
+        </div>
       </div>
     </Panel>
   );
@@ -382,6 +419,8 @@ export function Inspector(props) {
         onBeginEdit={props.onBeginEdit}
         onEndEdit={props.onEndEdit}
         onRemove={props.onDelete}
+        onRehearse={props.onRehearse}
+        onRecordText={props.onRecordText}
       />
     );
   } else if (active === 'recording') {

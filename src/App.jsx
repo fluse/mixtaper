@@ -7,6 +7,7 @@ import { YouTubeDialog, ExportDialog, JCardDialog } from './components/Dialogs';
 import { SoundLibrary } from './components/SoundLibrary';
 import { VoiceFxDialog } from './components/VoiceFxDialog';
 import { FxDialog } from './components/FxDialog';
+import { Prompter } from './components/Prompter';
 import { encodeWav } from './lib/voicefx';
 import { ResizeHandle } from './components/ui';
 import { useHistory } from './lib/history';
@@ -62,7 +63,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [recording, setRecording] = useState(null);
   const [recSettings, setRecSettings] = useState(() => {
-    const defaults = { deviceId: '', lowerMusic: false, cueLevel: 0.35, trimSilence: true };
+    const defaults = { deviceId: '', lowerMusic: false, cueLevel: 0.35, trimSilence: true, prompter: true, wpm: 130, promptText: '' };
     try {
       return { ...defaults, ...JSON.parse(localStorage.getItem('mixtape.recSettings') || '{}') };
     } catch {
@@ -469,8 +470,20 @@ export default function App() {
   /* Aufnahme                                                          */
   /* ---------------------------------------------------------------- */
 
-  const startRecording = useCallback(async () => {
+  const [prompter, setPrompter] = useState(null); // { text, mode: 'record' | 'rehearse' }
+
+  /** Vorlesetext: Notiz an/vor der Abspielposition, sonst eigener Text aus den Einstellungen. */
+  const findPromptText = useCallback(() => {
+    const t = playhead.get();
+    const m = docRef.current.markers
+      .filter((x) => x.note?.trim() && x.time <= t + 0.5)
+      .sort((a, b) => b.time - a.time)[0];
+    return m?.note?.trim() || recSettings.promptText?.trim() || '';
+  }, [recSettings.promptText]);
+
+  const startRecording = useCallback(async (opts) => {
     if (recRef.current) return;
+    const promptText = typeof opts?.text === 'string' ? opts.text : recSettings.prompter ? findPromptText() : '';
     let stream;
     try {
       const audio = { echoCancellation: false, noiseSuppression: true, autoGainControl: true };
@@ -517,7 +530,8 @@ export default function App() {
 
     recRef.current = { mr, stream, input, chunks, startAt, trackId: track.id };
     setRecording({ analyser, trackId: track.id });
-  }, [notify, player, recSettings, selectedTrackId, set]);
+    if (promptText) setPrompter({ text: promptText, mode: 'record' });
+  }, [notify, player, recSettings, selectedTrackId, set, findPromptText]);
 
   const stopRecording = useCallback(async () => {
     const r = recRef.current;
@@ -530,6 +544,7 @@ export default function App() {
     r.input.disconnect();
     recRef.current = null;
     setRecording(null);
+    setPrompter((p) => (p?.mode === 'record' ? null : p));
     stopPlayback();
     player.setCue(1);
 
@@ -576,6 +591,14 @@ export default function App() {
   }, [loadSource, notify, player, recSettings.trimSilence, set, stopPlayback]);
 
   const toggleRecord = useCallback(() => (recRef.current ? stopRecording() : startRecording()), [startRecording, stopRecording]);
+
+  const recordMarkerText = useCallback(
+    (marker) => {
+      seek(marker.time);
+      startRecording({ text: marker.note || '' });
+    },
+    [seek, startRecording],
+  );
 
   /* ---------------------------------------------------------------- */
   /* Bearbeiten                                                        */
@@ -1111,6 +1134,8 @@ export default function App() {
         onMarkerChange={updateMarker}
         onDocChange={updateDoc}
         onDelete={deleteSelection}
+        onRehearse={(m) => setPrompter({ text: m.note || '', mode: 'rehearse' })}
+        onRecordText={recordMarkerText}
         onBeginEdit={beginEdit}
         onEndEdit={endEdit}
         clipActions={clipActions}
@@ -1162,6 +1187,17 @@ export default function App() {
           source={sourcesRef.current.get(selectedClip.sourceId)}
           onApply={applyVoiceFx}
           onClose={() => setDialog(null)}
+        />
+      )}
+
+      {prompter && (
+        <Prompter
+          key={prompter.text + prompter.mode}
+          text={prompter.text}
+          mode={prompter.mode}
+          wpm={recSettings.wpm}
+          onWpmStep={(d) => setRecSettings((s) => ({ ...s, wpm: clamp(s.wpm + d, 60, 260) }))}
+          onClose={() => setPrompter(null)}
         />
       )}
 
